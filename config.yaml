@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# App configuration. Edit freely; restart the backend after changes.
+# Prices are NOT hardcoded in Python. They live here so you can update them
+# when Anthropic changes its pricing (check https://claude.com/pricing).
+# ---------------------------------------------------------------------------
+
+# The model used by default for every experiment.
+# Claude Haiku 5.5 is the cheapest current Claude model.
+default_model: claude-haiku-5-5
+
+# Haiku 5.5 rejects temperature / top_p / top_k and assistant "prefill".
+# Experiments that need those (e.g. lessons 01 and 04) use this model instead.
+# Haiku 4.5 is the cheapest model that still accepts them.
+sampling_model: claude-haiku-4-5
+
+# Safety cap: no experiment may repeat a call more than this many times.
+max_repeated_runs: 30
+
+# Spend guard: the backend refuses Claude calls once this calendar month's
+# estimated spend reaches this amount (USD). Spend is tracked in data/spend.json.
+monthly_budget_usd: 1.00
+
+# Per-model facts. Prices are USD per 1 million tokens.
+models:
+  claude-haiku-5-5:
+    input_price_per_mtok: 0.10
+    output_price_per_mtok: 0.50
+    # Haiku 5.5 charges a higher rate when the prompt is longer than this.
+    long_prompt_threshold_tokens: 100000
+    long_prompt_input_price_per_mtok: 0.50
+    long_prompt_output_price_per_mtok: 2.50
+    context_window: 1000000
+    supports_sampling_params: false    # temperature/top_p/top_k -> API error
+    supports_prefill: false            # ending messages with an assistant turn -> API error
+    thinking_on_by_default: true       # we turn it off so outputs are just the answer
+
+  claude-haiku-4-5:
+    input_price_per_mtok: 1.00
+    output_price_per_mtok: 5.00
+    context_window: 200000
+    supports_sampling_params: true
+    # On this model, setting temperature AND top_p in one request is rejected.
+    allows_temperature_and_top_p_together: false
+    supports_prefill: true
+    thinking_on_by_default: false
+
+    

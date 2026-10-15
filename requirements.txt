@@ -1,0 +1,12 @@
+# Backend
+anthropic>=0.75        # official Anthropic SDK (the only LLM library we use)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-dotenv>=1.0     # loads ANTHROPIC_API_KEY from .env
+pyyaml>=6.0            # reads config.yaml
+
+# Frontend
+streamlit>=1.50        # st.navigation + the width="stretch" option
+plotly>=5.20
+pandas>=2.0
+requests>=2.31         # frontend -> backend HTTP calls

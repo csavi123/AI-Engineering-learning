@@ -1,0 +1,21 @@
+# The 17 chapters of the AI Engineering programme, in course order.
+# `content` points at the chapter's file in this folder once it's built;
+# chapters without it show as "coming soon" on the Home map.
+chapters:
+  - {id: ch01, number: 1, title: "How LLMs actually work", content: ch01_how_llms_work.yaml}
+  - {id: ch02, number: 2, title: "Classical ML/DL baseline"}
+  - {id: ch03, number: 3, title: "Python & tooling"}
+  - {id: ch04, number: 4, title: "Model APIs & failure handling"}
+  - {id: ch05, number: 5, title: "Prompting & context engineering"}
+  - {id: ch06, number: 6, title: "Structured output & tool calling"}
+  - {id: ch07, number: 7, title: "RAG & retrieval quality"}
+  - {id: ch08, number: 8, title: "Fine-tuning & when to use it"}
+  - {id: ch09, number: 9, title: "Evals (signature skill)"}
+  - {id: ch10, number: 10, title: "Agents & reliability"}
+  - {id: ch11, number: 11, title: "Multi-modal basics"}
+  - {id: ch12, number: 12, title: "Production & observability"}
+  - {id: ch13, number: 13, title: "Serving & infra"}
+  - {id: ch14, number: 14, title: "AI security"}
+  - {id: ch15, number: 15, title: "System design for AI"}
+  - {id: ch16, number: 16, title: "DSA baseline"}
+  - {id: ch17, number: 17, title: "Communication & narrative"}

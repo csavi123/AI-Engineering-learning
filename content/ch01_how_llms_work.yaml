@@ -1,0 +1,475 @@
+# Chapter 1 content. Every lesson uses the same fields, so the app can draw
+# any lesson with one renderer:
+#   status      ready = full card; coming = waiting for the lesson text
+#   one_liner   the line used in the 60-second cheat sheet
+#   core_idea   "if you remember one thing"
+#   picture     a Graphviz diagram (DOT language)
+#   key_points  3-5 short lines
+#   demo        id of the main demo (see frontend/demos/__init__.py)
+#   quiz        multiple choice: options, answer (0-based index), why
+#   deeper      extra notes, extra demo ids, and an own-words question
+id: ch01
+number: 1
+title: "How LLMs actually work"
+
+picture: |
+  digraph {
+    rankdir=LR; bgcolor="transparent"; nodesep=0.3;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985", fillcolor="#dbe8f8"];
+    edge [color="#8a8985"];
+    l01 [label="01 What it IS\nnext-token function\nrun in a loop", fillcolor="#fde3d8", penwidth=2];
+    l02 [label="02 What it READS\ntokens, not words"];
+    l03 [label="03 What it SEES\nonly the context window"];
+    l04 [label="04 How it PICKS\nsampling from a\ndistribution"];
+    l05 [label="05 Why it MAKES THINGS UP\nplausible ≠ true"];
+    l06 [label="06 How it COMPUTES\nembeddings, attention,\nposition"];
+    l07 [label="07 What BREAKS\nwhen inputs get long"];
+    l01 -> l02 -> l03 -> l04;
+    l01 -> l05; l04 -> l05;
+    l01 -> l06 -> l07; l03 -> l07;
+  }
+
+lessons:
+  - id: l01
+    number: "01"
+    title: "A model is a next-token predictor"
+    status: ready
+    one_liner: "An LLM is a function that returns a probability for every possible next token; every answer is that one step run in a loop."
+    core_idea: "Tokens go in, a probability for every possible next token comes out. Pick one, append it, repeat. That loop is everything an LLM does."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=12, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        seq  [label="Sequence so far\n\"The capital of France is\"", fillcolor="#dbe8f8"];
+        fp   [label="FORWARD PASS\n(one function call)\nnothing stored", fillcolor="#fde3d8", penwidth=2];
+        dist [label="A probability for EVERY\ntoken in the vocabulary\n·Paris 0.92 · ·the 0.03 …", fillcolor="#d6f1e6"];
+        pick [label="Pick one token\n(outside the model)", fillcolor="#fbecc4"];
+        stop [label="Stop token?\n→ answer done", shape=ellipse, fillcolor="#eeeeee"];
+        seq -> fp -> dist -> pick;
+        pick -> seq [label="append & go again", constraint=false];
+        pick -> stop [style=dashed];
+      }
+    key_points:
+      - "**One forward pass** returns a probability for every token in the vocabulary (tens of thousands or more), not a sentence. Nothing is remembered between calls."
+      - "**Output is sequential:** a 500-token answer ≈ 500 forward passes, each waiting for the previous token. That's why output is slower and pricier than input."
+      - "**Output becomes input:** an early mistake becomes the premise for everything after it. There's no cursor to go back and retract."
+      - "**Not in the loop:** no plan, no lookup table, no truth check, no memory. Only \"what's a plausible next token?\""
+      - "**So the failures are structural:** confident wrong answers, drift, non-reproducible output, sensitivity to irrelevant wording. You build the missing parts *outside* the model."
+    demo: loop_stepper
+    quiz:
+      - q: "What does a single forward pass return?"
+        options:
+          - "A complete sentence"
+          - "A probability for every token in the vocabulary being next"
+          - "The correct next word, looked up from what it knows"
+          - "A plan for the whole answer"
+        answer: 1
+        why: "One forward pass scores every possible next token. Turning that into text takes a loop: pick, append, repeat."
+      - q: "Why does a 500-token answer take roughly 500 forward passes?"
+        options:
+          - "Each pass produces one token, and needs the previous token as part of its input"
+          - "The API deliberately slows down long answers"
+          - "The model re-reads its training data for every word"
+          - "Input and output are processed the same way"
+        answer: 0
+        why: "Token 200 can't be computed until token 199 exists. The input is all known up front, so it's processed in one go; the output can't be."
+      - q: "A model makes a wrong claim in sentence two, then argues coherently from it for four paragraphs. Which property explains this?"
+        options:
+          - "It has a plan it must stick to"
+          - "It remembers the mistake from an earlier conversation"
+          - "Its own output becomes its input, and it can only append, never retract"
+          - "It looked up the wrong row in its fact database"
+        answer: 2
+        why: "Once generated, the wrong claim is part of the sequence every later forward pass is conditioned on. Building coherently on it is the most plausible continuation."
+    deeper:
+      notes: |
+        **Failure modes you can predict from the mechanism alone**
+
+        | Failure | Caused by |
+        |---|---|
+        | Confident wrong answers | A distribution always has a top token, so there's always an answer |
+        | Drift from an early mistake | Output is fed back as input |
+        | Not reproducible | The chooser may pick a different token each run |
+        | Sensitive to "irrelevant" wording | The whole input sequence, exactly as written, shapes the numbers |
+        | Length & position effects | Where something sits in a long input changes its influence |
+
+        **What you build outside the model:** retrieval (no lookup table) · resending history (no memory) · eval suites that run prompts many times (one run = one sample) · output validation (plausible ≠ valid) · grounding checks (no truth check) · logging inputs and outputs (no inspectable interior).
+      demos: [token_by_token, streaming, input_vs_output, compounding, opening_word]
+      own_words:
+        q: "Why can't a next-token predictor say it has no information, the way a database reports \"no matching rows\"?"
+        answer: "There are no rows. A forward pass always produces a full distribution, so there's always a most-likely next token and therefore always an answer. Missing knowledge shows up as fluent prose, not an error. \"I don't know\" appears only when that phrase itself is the plausible continuation."
+    source: "How LLMs actually work → 01 · A model is a next-token predictor"
+
+  - id: l02
+    number: "02"
+    title: "Tokens, not words"
+    status: ready
+    draft: true
+    one_liner: "Models read tokens (chunks of text), not words. Tokens are what you pay for and what fills the context window."
+    core_idea: "Before the model sees your text, it's chopped into tokens: common words are one token, rare words, code, numbers, other scripts and emoji split into several. Cost, speed and context limits are all counted in tokens."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=12, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        text [label="Your text\n\"Unbelievable pizza 🍕\"", fillcolor="#dbe8f8"];
+        tok  [label="Tokenizer\n(fixed vocabulary of chunks)", fillcolor="#fde3d8", penwidth=2];
+        ids  [label="Tokens\n[Un][believ][able][·pizza][·🍕 bytes…]", fillcolor="#d6f1e6"];
+        model [label="Model sees only\nthese token IDs", fillcolor="#fbecc4"];
+        money [label="Billing, speed &\ncontext limit\nall counted in tokens", shape=note, fillcolor="#eeeeee"];
+        text -> tok -> ids -> model;
+        ids -> money [style=dashed];
+      }
+    key_points:
+      - "**A token is a chunk of text** from a fixed vocabulary. Common English words are often one token; rare words split into pieces."
+      - "**Not all text is equal:** code, numbers, non-English scripts and emoji usually cost more tokens per word than plain English."
+      - "**Everything is counted in tokens:** price (input and output priced separately), speed, and the context window limit."
+      - "**Tokenizers differ by model:** the same text can be ~30% more tokens on newer Claude models, so always count with the model you'll use."
+      - "**It explains odd mistakes:** the model sees chunks, not letters, so counting letters or doing digit-by-digit arithmetic is harder than it looks."
+    demo: token_counter
+    quiz:
+      - q: "Which of these usually uses the MOST tokens per word?"
+        options:
+          - "A plain English sentence"
+          - "A sentence in a non-Latin script, or full of emoji"
+          - "A list of very common words"
+          - "They're all the same: one word is one token"
+        answer: 1
+        why: "Tokenizers are built mostly from common (often English) text, so other scripts and emoji get split into many small pieces."
+      - q: "A model has a 200,000 context window. 200,000 of what?"
+        options: ["Words", "Characters", "Tokens", "Sentences"]
+        answer: 2
+        why: "Limits, prices and speed are all measured in tokens, never words or characters."
+      - q: "Why might a model miscount the letters in \"strawberry\"?"
+        options:
+          - "It sees tokens (chunks), not individual letters"
+          - "It was never trained on that word"
+          - "Its temperature was too high"
+          - "The word is too long for the context window"
+        answer: 0
+        why: "The word arrives as a few chunks. The model never 'sees' the separate letters it's asked to count."
+    deeper:
+      notes: |
+        **Rule of thumb:** for plain English, budget roughly 1.3 tokens per word, but **measure** rather than guess: the demo above counts real Claude tokens for free.
+
+        **Why it matters for engineering:** prompts that include code, JSON, logs or non-English text can cost several times more than their word count suggests, and they fill the context window faster.
+      own_words:
+        q: "Why should you count tokens with the exact model you'll use, rather than reuse a count from another model?"
+        answer: "Each model family can have its own tokenizer. The same text can produce a different number of tokens (newer Claude models produce about 30% more), which changes both the cost and how much fits in the context window."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: l03
+    number: "03"
+    title: "The context window is the model's entire world"
+    status: ready
+    draft: true
+    one_liner: "The model knows only what's in the current input; anything you don't send, it doesn't have."
+    core_idea: "For each call, the model sees one thing: the input you send (system prompt, examples, documents, chat history and the question), plus room for its reply. Nothing else exists for it."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent"; compound=true;
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        subgraph cluster_ctx {
+          label="CONTEXT WINDOW (one call)"; fontname="Helvetica"; fontsize=11; color="#2a78d6"; style="rounded";
+          sys [label="System prompt", fillcolor="#dbe8f8"];
+          ex  [label="Examples", fillcolor="#fde3d8"];
+          doc [label="Documents", fillcolor="#d6f1e6"];
+          his [label="Chat history\n(resent every turn)", fillcolor="#fbecc4"];
+          q   [label="Current question", fillcolor="#f6d5e3"];
+          out [label="+ room for the reply", style="rounded,dashed", fillcolor="#ffffff"];
+        }
+        outside [label="Everything else:\nearlier chats, your files,\ntoday's date, your company wiki\n= INVISIBLE", shape=note, fillcolor="#eeeeee"];
+        outside -> his [style=invis];
+      }
+    key_points:
+      - "**No memory between calls.** Chat apps 'remember' only because they resend the whole conversation every turn."
+      - "**One shared budget:** system prompt, examples, documents, history, question *and* the reply must all fit in the window (measured in tokens)."
+      - "**You pay for all of it, every turn.** As a chat grows, each new turn resends more history, so it costs more."
+      - "**If it's not in the window, it doesn't exist:** not your documents, not last week's chat, not today's date, unless you put it there."
+      - "**More context isn't free:** it adds cost and latency, and (lesson 07) quality can degrade."
+    demo: context_budget
+    quiz:
+      - q: "A chatbot 'remembers' what you said 10 messages ago. How?"
+        options:
+          - "The model stores conversations in its weights"
+          - "The app resends the earlier messages as part of the input"
+          - "The model has a separate long-term memory"
+          - "It guesses from patterns in your writing"
+        answer: 1
+        why: "The model is stateless. The app includes the history in every request, which is also why long chats cost more."
+      - q: "What must fit inside the context window?"
+        options:
+          - "Only the user's question"
+          - "The system prompt and question, but not the reply"
+          - "Everything sent (system, examples, docs, history, question) plus the reply"
+          - "Only the documents"
+        answer: 2
+        why: "Input and output share one token budget per call."
+      - q: "You ask 'What's today's date?' without giving it. What happens?"
+        options:
+          - "The model checks the server clock"
+          - "It can only guess, because the date isn't in its context"
+          - "It always refuses"
+          - "It looks it up online"
+        answer: 1
+        why: "Anything not in the input is invisible. It may guess from training data, which is a hallucination risk (lesson 05)."
+    deeper:
+      notes: |
+        **Cost grows with every turn.** Because history is resent, turn 20 of a chat can send 10-20× more input tokens than turn 1. The simulation below shows the curve.
+      demos: [history_growth, code_word]
+      own_words:
+        q: "Why does the 10th message of a long chat cost more than the 1st, even if both messages are the same length?"
+        answer: "The model has no memory, so the app resends the whole history with every message. By message 10 the input contains all nine earlier exchanges, and you pay for those tokens again on every call."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: l04
+    number: "04"
+    title: "Sampling and why output is non-deterministic"
+    status: ready
+    draft: true
+    one_liner: "Each token is picked from a probability distribution, sometimes randomly, so the same prompt can give different answers."
+    core_idea: "The model only provides probabilities; a sampler picks the token. Temperature reshapes the distribution and top-k/top-p trim it before the pick. Any randomness means the same prompt can take different paths."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985"];
+        d  [label="Model's probabilities\n·pizza 64% ·pasta 16% …", fillcolor="#d6f1e6"];
+        t  [label="TEMPERATURE\n<1 sharper · >1 flatter\n0 = always the top", fillcolor="#fde3d8"];
+        k  [label="TOP-K\nkeep the k best", fillcolor="#fbecc4"];
+        p  [label="TOP-P\nkeep the top tokens\nthat add up to p", fillcolor="#fbecc4"];
+        pick [label="Random pick\n(weighted)", fillcolor="#dbe8f8"];
+        out [label="One token", shape=ellipse, fillcolor="#eeeeee"];
+        d -> t -> k -> p -> pick -> out;
+      }
+    key_points:
+      - "**The model returns probabilities; the sampler chooses.** That choice can be random, so identical requests can diverge."
+      - "**Temperature** scales the distribution: lower = sharper and more predictable, higher = flatter and more varied, 0 ≈ always the top token."
+      - "**top-k** keeps only the k most likely tokens; **top-p** keeps the smallest set of top tokens whose probabilities add up to p."
+      - "**One different early token changes everything after it** (lesson 01), so small randomness can produce very different answers."
+      - "**Temperature 0 can still vary** a little: GPU floating-point math, batching with other requests and infrastructure changes can shift close scores."
+    demo: sampling_simulator
+    quiz:
+      - q: "What does lowering the temperature do?"
+        options:
+          - "Makes the model smarter"
+          - "Sharpens the distribution, so the most likely tokens are picked more often"
+          - "Shortens the answer"
+          - "Removes the randomness from the model's training"
+        answer: 1
+        why: "Temperature reshapes the probabilities before sampling; it doesn't change what the model knows."
+      - q: "top-p = 0.9 means…"
+        options:
+          - "Only the single top token is used"
+          - "Keep the smallest set of top tokens whose probabilities add up to 90%, then sample among them"
+          - "90% of answers will be correct"
+          - "Use the top 9 tokens"
+        answer: 1
+        why: "top-p trims the long tail of unlikely tokens; the cut-off adapts to how peaked the distribution is."
+      - q: "You set temperature to 0 and still occasionally get a different answer. Why?"
+        options:
+          - "The setting was ignored"
+          - "Tiny numerical differences (GPU math, batching) can flip near-tied tokens, and one flip changes the rest"
+          - "Temperature 0 means maximum randomness"
+          - "The model learned something new between calls"
+        answer: 1
+        why: "When two tokens are nearly tied, tiny floating-point differences can change which is 'top', and the divergence compounds."
+    deeper:
+      notes: |
+        **On Claude specifically:** Claude Haiku 5.5 doesn't accept temperature, top-p or top-k (non-default values are rejected), and Claude Haiku 4.5 accepts temperature *or* top-p but not both together. That's why the live demo uses Haiku 4.5.
+
+        **Why real chat models look 'peaked':** extra training to give the single best answer makes their distributions much sharper than a raw text model's. Your live run of *"My favorite food is"* came back 100% pizza.
+      demos: [one_token_sampling]
+      own_words:
+        q: "Why is 'run it once and check' not enough to test an LLM feature?"
+        answer: "Each run is one sample from a distribution. A different random pick early on can lead to a different answer, so you need to run a prompt many times to see the range of outputs and how often each one happens."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: l05
+    number: "05"
+    title: "Why hallucination is structural"
+    status: ready
+    draft: true
+    one_liner: "The model produces what's plausible, not what's true, and no prompt can install a truth check."
+    core_idea: "A next-token predictor always produces the most plausible continuation. Usually plausible = true, but on rare, specific or recent facts they split, and the model fluently produces something false. Nothing in the loop checks."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        q  [label="Question", fillcolor="#dbe8f8"];
+        m  [label="Most PLAUSIBLE\ncontinuation", fillcolor="#fde3d8", penwidth=2];
+        common [label="Common, well-covered fact\n→ plausible = true ✅", fillcolor="#d6f1e6"];
+        rare   [label="Rare / specific / recent fact\n→ plausible ≠ true ❌\n(fluent, confident, wrong)", fillcolor="#f6d5e3"];
+        check  [label="Truth check?\n(not in the loop)", shape=diamond, style="dashed", fillcolor="#ffffff"];
+        q -> m; m -> common; m -> rare;
+        rare -> check [style=dashed, label="must be built outside"];
+      }
+    key_points:
+      - "**It's structural, not a bug:** there's always a top next token (lesson 01), no lookup table and no truth check, so missing knowledge comes out as fluent prose."
+      - "**Hot spots:** rare, recent, very specific or company-internal facts, plus exact details: citations, numbers, quotes, names."
+      - "**Prompts help but can't fix it:** 'say I don't know if unsure' only works when 'I don't know' is itself the plausible continuation."
+      - "**Grounding helps most:** paste the source into the context and ask the model to answer only from it."
+      - "**Verify outside the model:** check citations, numbers and claims against an independent source."
+    demo: doi_checker
+    quiz:
+      - q: "Why does an LLM invent a citation instead of saying it doesn't know one?"
+        options:
+          - "It's trying to deceive you"
+          - "A distribution always has a top token, and a fluent fake citation is a plausible continuation"
+          - "Its database of papers is out of date"
+          - "The temperature was set too high"
+        answer: 1
+        why: "Nothing in generation checks existence. It produces what a citation looks like."
+      - q: "Which approach reduces hallucination the MOST?"
+        options:
+          - "Writing 'DO NOT HALLUCINATE' in capitals"
+          - "Grounding: put the source text in the context and answer only from it"
+          - "Asking the same question twice"
+          - "Using a longer prompt"
+        answer: 1
+        why: "Grounding moves the facts into the context, where the model can copy them instead of guessing."
+      - q: "Why can't a better prompt fully fix hallucination?"
+        options:
+          - "Prompts are ignored by the model"
+          - "A prompt changes the probabilities, but can't add a fact lookup or a truth check to the loop"
+          - "Only fine-tuning affects behaviour"
+          - "Prompts are limited to 100 tokens"
+        answer: 1
+        why: "Prompting shifts plausibility. It can't install the missing components: fact lookup and verification."
+    deeper:
+      demos: [citation_check, made_up_fact]
+      own_words:
+        q: "Explain why 'say I don't know if you're unsure' reduces, but can't eliminate, hallucination."
+        answer: "The model has no internal sense of certainty to consult. The instruction makes 'I don't know' a more plausible continuation, so it appears more often, but when a made-up answer still looks more plausible (for example, a fake place that sounds real), the model produces that instead."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: l06
+    number: "06"
+    title: "Inside the transformer: embeddings, attention, position"
+    status: ready
+    draft: true
+    one_liner: "Tokens become vectors (embeddings), attention links related tokens, and position encodes word order."
+    core_idea: "Each token becomes a vector (embedding) tagged with its position; attention layers let every token pull in information from the tokens that matter to it; many stacked layers turn that into the next-token scores from lesson 01."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985"];
+        t  [label="Tokens\n[The][trophy]…[it]", fillcolor="#dbe8f8"];
+        e  [label="EMBEDDINGS\neach token → a long\nlist of numbers", fillcolor="#d6f1e6"];
+        p  [label="+ POSITION\nwhere each token sits", fillcolor="#fbecc4"];
+        a  [label="ATTENTION\neach token looks at\nthe others it needs\n('it' → 'trophy')", fillcolor="#fde3d8", penwidth=2];
+        l  [label="× many layers\n(attention + feed-forward)", fillcolor="#f6d5e3"];
+        o  [label="Scores for every\nnext token (lesson 01)", shape=ellipse, fillcolor="#eeeeee"];
+        t -> e -> p -> a -> l -> o;
+      }
+    key_points:
+      - "**Embeddings:** each token becomes a long vector of numbers; tokens used in similar ways end up with similar vectors."
+      - "**Attention:** for every token, the model weighs how much each earlier token matters to it. That's how 'it' gets linked to 'trophy'."
+      - "**Position:** attention by itself ignores order, so position information is added. 'Dog bites man' ≠ 'man bites dog'."
+      - "**Depth:** many layers of attention + feed-forward refine these vectors; the last layer produces the next-token scores."
+      - "**You can't see any of this through the Claude API:** no attention weights, embeddings or probabilities. Demos here are toys or behavioural evidence."
+    demo: attention_toy
+    quiz:
+      - q: "What is an embedding?"
+        options:
+          - "A compressed copy of the training data"
+          - "A vector of numbers representing a token, where similar usage gives similar vectors"
+          - "The model's answer before formatting"
+          - "A list of the model's rules"
+        answer: 1
+        why: "Embeddings turn discrete tokens into numbers the network can compute with."
+      - q: "In 'The trophy didn't fit in the suitcase because it was too big', what lets the model link 'it' to 'trophy'?"
+        options: ["Tokenization", "Attention", "Temperature", "The context window limit"]
+        answer: 1
+        why: "Attention lets the token 'it' pull in information from the relevant earlier token."
+      - q: "Why do transformers need position information?"
+        options:
+          - "To count the tokens for billing"
+          - "Because attention alone ignores word order, so 'dog bites man' would look like 'man bites dog'"
+          - "To know where the context window ends"
+          - "To speed up generation"
+        answer: 1
+        why: "Same tokens, different order, different meaning: position has to be added explicitly."
+    deeper:
+      demos: [trophy_suitcase, option_order]
+      own_words:
+        q: "Why is everything we can show about attention through the Claude API only 'behavioural evidence'?"
+        answer: "The API returns only text and token counts, not attention weights, embeddings or probabilities. So we can only infer what attention does from how the model behaves on carefully designed inputs, like changing one word and seeing whether the answer flips."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: l07
+    number: "07"
+    title: "Context length, truncation and what actually degrades"
+    status: ready
+    draft: true
+    one_liner: "Long inputs degrade: where a fact sits changes whether it's used, and old content gets cut off."
+    core_idea: "Fitting in the window isn't the same as being used well. Long inputs cost more, can bury facts (especially in the middle), and once you exceed a budget something must be cut: your truncation strategy decides what the model forgets."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        s [label="START\nusually used well", fillcolor="#d6f1e6"];
+        m [label="MIDDLE of a long input\noften used least", fillcolor="#f6d5e3"];
+        e [label="END\nusually used well", fillcolor="#d6f1e6"];
+        over [label="Over budget?\nsomething must go", shape=diamond, fillcolor="#fbecc4"];
+        d1 [label="Drop oldest\n(loses early facts)", fillcolor="#dbe8f8"];
+        d2 [label="Keep last N\n(blunt)", fillcolor="#dbe8f8"];
+        d3 [label="Summarize old turns\n(extra call, lossy)", fillcolor="#dbe8f8"];
+        s -> m -> e -> over; over -> d1; over -> d2; over -> d3;
+      }
+    key_points:
+      - "**Every extra token costs money and time** on every call, even if the answer is short."
+      - "**Position matters:** in long inputs, facts near the start and end are usually used more reliably than those in the middle. It varies by model and task."
+      - "**Over budget, something must go:** drop the oldest turns, keep the system prompt + last N turns, or summarize old turns. Each forgets different things."
+      - "**Output can be truncated too:** `max_tokens` cuts the answer off mid-sentence; `stop_reason: max_tokens` tells you it happened."
+      - "**Test with your own data:** needle-in-a-haystack at several depths and lengths, with realistic (reworded) questions."
+    demo: truncation_sim
+    quiz:
+      - q: "Where in a long input is a fact most likely to be missed?"
+        options: ["At the very start", "In the middle", "At the very end", "Position never matters"]
+        answer: 1
+        why: "Many models use the beginning and end of long contexts more reliably than the middle."
+      - q: "Your chat drops the oldest turns to fit a budget. What's the risk?"
+        options:
+          - "Higher cost"
+          - "Early facts (like an allergy mentioned in turn 1) silently disappear"
+          - "The model gets slower"
+          - "Nothing: old turns never matter"
+        answer: 1
+        why: "Whatever you cut doesn't exist for the model anymore (lesson 03)."
+      - q: "A response ends mid-sentence with stop_reason 'max_tokens'. What happened?"
+        options:
+          - "The model finished its thought"
+          - "The output hit the max_tokens limit and was cut off"
+          - "The input was too long"
+          - "The model refused to answer"
+        answer: 1
+        why: "end_turn = finished; max_tokens = truncated. Always check it in code."
+    deeper:
+      demos: [needle_test, output_truncation]
+      own_words:
+        q: "Your context window is 1M tokens. Why might you still keep prompts short?"
+        answer: "Every token costs money and latency on every call, and recall gets less reliable with very long inputs, especially in the middle. Fitting in the window doesn't mean the model will use everything well."
+    source: "Draft: written from general knowledge. Paste the course lesson to align it."
+
+  - id: prove_it
+    number: "1.1"
+    title: "Prove it"
+    status: ready
+    draft: true
+    kind: prove_it
+    one_liner: "Prove you understand the chapter: a mixed quiz from all lessons, from memory."
+    core_idea: "Can you explain chapter 1 without looking? Answer a mixed set of questions from every lesson."
+    can_you:
+      - "State in one sentence what a single forward pass computes and returns"
+      - "Explain why tokens, not words, set cost and context limits"
+      - "Explain why the model only knows what's in its context window"
+      - "Explain why the same prompt can give different answers"
+      - "Explain why hallucination can't be fixed by prompting alone"
+      - "Describe embeddings, attention and position in one line each"
+      - "Name three truncation strategies and what each one forgets"
+    source: "Our version of 'Prove it'. The course's exercise may differ; paste it to align."
