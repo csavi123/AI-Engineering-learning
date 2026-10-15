@@ -5,11 +5,21 @@ wall between the UI and the API key: this process never loads .env's key.
 """
 import json
 import os
+import time
 from typing import Any, Dict, Iterator, List, Optional
 
 import requests
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+
+# Free hosting (Render) puts the backend to sleep when nobody has used it for a
+# while. While it wakes up, the host answers with its OWN HTML error page
+# (502/503/504) instead of our JSON, so we must never show that page as is.
+WAKING_STATUSES = (502, 503, 504)
+WAKING_MESSAGE = (
+    "The backend is waking up (free hosting sleeps when nobody has used it for a "
+    "while). Give it about a minute, then refresh the page."
+)
 
 
 class BackendError(Exception):
@@ -23,7 +33,12 @@ def _handle(resp: requests.Response) -> Dict[str, Any]:
     try:
         detail = resp.json().get("detail", resp.text)
     except ValueError:
-        detail = resp.text
+        # Not JSON, so it came from the host, not our backend (e.g. an HTML
+        # "502" page). Replace it with a short message instead of dumping it.
+        if resp.status_code in WAKING_STATUSES:
+            detail = WAKING_MESSAGE
+        else:
+            detail = f"The backend returned an unexpected error (HTTP {resp.status_code})."
     raise BackendError(str(detail))
 
 
@@ -34,6 +49,28 @@ def _get(path: str) -> Dict[str, Any]:
         raise BackendError(
             f"Can't reach the backend at {BACKEND_URL}. Is uvicorn running?"
         )
+    except requests.Timeout:
+        # A sleeping backend can take longer than 10s to answer.
+        raise BackendError(WAKING_MESSAGE)
+
+
+def wait_for_backend(max_wait_s: float = 90) -> bool:
+    """Ping /health until the backend answers, for up to max_wait_s seconds.
+
+    Free: /health never calls Anthropic. Run once per visit so a sleeping
+    backend shows a "waking up" spinner instead of an error. Only the free GET
+    is retried, never a paid call, so a retry can't charge you twice.
+    Returns True once the backend is up.
+    """
+    deadline = time.monotonic() + max_wait_s
+    while True:
+        try:
+            health()
+            return True
+        except BackendError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(3)
 
 
 def _post(path: str, body: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
@@ -43,6 +80,8 @@ def _post(path: str, body: Dict[str, Any], timeout: float = 120) -> Dict[str, An
         raise BackendError(
             f"Can't reach the backend at {BACKEND_URL}. Is uvicorn running?"
         )
+    except requests.Timeout:
+        raise BackendError("The backend took too long to answer. Please try again.")
 
 
 def health() -> Dict[str, Any]:

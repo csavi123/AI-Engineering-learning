@@ -48,6 +48,12 @@ pages = {
     "Chapters": [chapter_page(c) for c in built],
 }
 
+# Free hosting puts the backend to sleep when idle. Wake it once per visit,
+# behind a spinner, so visitors see "waking up" instead of an error page.
+if not st.session_state.get("backend_awake"):
+    with st.spinner("Waking up the backend… free hosting naps when idle, so this can take up to a minute."):
+        st.session_state["backend_awake"] = api.wait_for_backend()
+
 # Running total, so spending is never a surprise.
 with st.sidebar:
     try:
