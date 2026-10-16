@@ -1,7 +1,8 @@
-"""Draws a chapter page: overview first, then one lesson at a time.
+"""Draws a chapter's pages: one overview page, plus one page per lesson.
 
-Showing a single lesson at a time (instead of everything stacked) keeps the
-page short, which is the whole point: you should never feel lost.
+Each lesson is its own page (with its own link) and is opened from the
+chapter's fold-out list in the sidebar. Showing a single lesson at a time
+keeps every page short, which is the whole point: you should never feel lost.
 """
 from typing import Any, Dict
 
@@ -9,10 +10,11 @@ import streamlit as st
 
 import content
 import lesson_card
+import nav
 import quiz
 
 
-def render(chap: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+def render_overview(chap: Dict[str, Any]) -> None:
     st.title(f"Chapter {chap['number']} · {chap['title']}")
 
     lessons = chap["lessons"]
@@ -29,12 +31,12 @@ def render(chap: Dict[str, Any], cfg: Dict[str, Any]) -> None:
             mark = "" if lesson.get("status") == "ready" else " 🚧"
             st.markdown(f"**{lesson['number']} · {lesson['title']}**{mark}  \n{lesson['one_liner']}")
 
-    st.markdown("### Open a lesson")
-    labels = {lesson["id"]: f"{lesson['number']} · {lesson['title']}" for lesson in lessons}
-    chosen = st.radio(
-        "Lesson", list(labels), format_func=labels.get, horizontal=True,
-        key=f"{chap['id']}_lesson", label_visibility="collapsed",
-    )
-    st.divider()
-    lesson = next(lesson for lesson in lessons if lesson["id"] == chosen)
+    first = lessons[0]
+    st.page_link(nav.LESSON_PAGES[(chap["id"], first["id"])],
+                 label=f"Start with {first['number']} · {first['title']} →", icon="📖")
+    st.caption("All lessons are listed under this chapter in the sidebar.")
+
+
+def render_lesson(chap: Dict[str, Any], lesson: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+    st.caption(f"Chapter {chap['number']} · {chap['title']}")
     lesson_card.render(chap, lesson, cfg)
