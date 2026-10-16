@@ -8,10 +8,12 @@ Run with:  uvicorn backend.main:app --reload --port 8000
 """
 import itertools
 import json
+import os
+import secrets
 from typing import Any, Dict, List, Optional
 
 import anthropic
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -21,7 +23,29 @@ from backend.claude_client import (
 from backend import spend
 from backend.config import api_key_present, load_config
 
-app = FastAPI(title="LLM Learning Lab backend")
+# Shared secret between the Streamlit app and this backend. When it is set
+# (in production), only callers that send it can use the endpoints below, so
+# someone who finds this URL can't spend your API credit directly.
+# Left unset (local development), the backend stays open as before.
+BACKEND_TOKEN = os.environ.get("BACKEND_TOKEN", "")
+
+# With a token set we're in production: hide the auto-generated /docs page,
+# which would otherwise list every endpoint and let anyone try them.
+_docs_off = {"docs_url": None, "redoc_url": None, "openapi_url": None} if BACKEND_TOKEN else {}
+app = FastAPI(title="LLM Learning Lab backend", **_docs_off)
+
+
+def _require_token(x_backend_token: str = Header(default="")) -> None:
+    """Reject requests without the shared secret (when one is configured)."""
+    # compare_digest takes the same time whether the guess is close or not,
+    # so the token can't be worked out by timing many wrong guesses.
+    if BACKEND_TOKEN and not secrets.compare_digest(x_backend_token, BACKEND_TOKEN):
+        raise HTTPException(status_code=401, detail="Missing or wrong backend token.")
+
+
+# /health stays open on purpose: the keep-alive pinger calls it without a
+# token, and it only reveals "up" plus a true/false, never the key.
+PROTECTED = [Depends(_require_token)]
 
 
 class Message(BaseModel):
@@ -48,7 +72,7 @@ def health() -> Dict[str, Any]:
     return {"status": "ok", "api_key_configured": api_key_present()}
 
 
-@app.get("/config")
+@app.get("/config", dependencies=PROTECTED)
 def get_config() -> Dict[str, Any]:
     """Share model names and prices with the frontend (never the key)."""
     return load_config()
@@ -87,13 +111,13 @@ EXPECTED_ERRORS = (
 )
 
 
-@app.get("/spend")
+@app.get("/spend", dependencies=PROTECTED)
 def get_spend() -> Dict[str, Any]:
     """This month's estimated spend and the budget, for the sidebar."""
     return {"month_total_usd": spend.month_total(), "budget_usd": spend.budget()}
 
 
-@app.post("/call")
+@app.post("/call", dependencies=PROTECTED)
 def call(req: CallRequest) -> Dict[str, Any]:
     """Generic single call to Claude via the shared helper."""
     try:
@@ -117,7 +141,7 @@ class CountRequest(BaseModel):
     system: Optional[str] = None
 
 
-@app.post("/count_tokens")
+@app.post("/count_tokens", dependencies=PROTECTED)
 def count(req: CountRequest) -> Dict[str, Any]:
     """Free: how many input tokens this request would use. Nothing is generated."""
     try:
@@ -127,7 +151,7 @@ def count(req: CountRequest) -> Dict[str, Any]:
     return {"input_tokens": n, "model": req.model or load_config()["default_model"]}
 
 
-@app.post("/stream")
+@app.post("/stream", dependencies=PROTECTED)
 def stream(req: CallRequest) -> StreamingResponse:
     """Stream the reply as it is generated, one JSON object per line.
 

@@ -12,6 +12,11 @@ import requests
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
+# Shared secret the backend checks (set in Streamlit secrets in production).
+# This runs on the Streamlit server, so visitors' browsers never see it.
+_TOKEN = os.environ.get("BACKEND_TOKEN", "")
+HEADERS = {"X-Backend-Token": _TOKEN} if _TOKEN else {}
+
 # Free hosting (Render) puts the backend to sleep when nobody has used it for a
 # while. While it wakes up, the host answers with its OWN HTML error page
 # (502/503/504) instead of our JSON, so we must never show that page as is.
@@ -44,7 +49,7 @@ def _handle(resp: requests.Response) -> Dict[str, Any]:
 
 def _get(path: str) -> Dict[str, Any]:
     try:
-        return _handle(requests.get(f"{BACKEND_URL}{path}", timeout=10))
+        return _handle(requests.get(f"{BACKEND_URL}{path}", headers=HEADERS, timeout=10))
     except requests.ConnectionError:
         raise BackendError(
             f"Can't reach the backend at {BACKEND_URL}. Is uvicorn running?"
@@ -75,7 +80,7 @@ def wait_for_backend(max_wait_s: float = 90) -> bool:
 
 def _post(path: str, body: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
     try:
-        return _handle(requests.post(f"{BACKEND_URL}{path}", json=body, timeout=timeout))
+        return _handle(requests.post(f"{BACKEND_URL}{path}", json=body, headers=HEADERS, timeout=timeout))
     except requests.ConnectionError:
         raise BackendError(
             f"Can't reach the backend at {BACKEND_URL}. Is uvicorn running?"
@@ -131,7 +136,7 @@ def stream(
     body = {"messages": messages, "model": model, "system": system, "max_tokens": max_tokens}
     try:
         # stream=True tells requests not to wait for the whole response.
-        with requests.post(f"{BACKEND_URL}/stream", json=body, stream=True, timeout=120) as resp:
+        with requests.post(f"{BACKEND_URL}/stream", json=body, headers=HEADERS, stream=True, timeout=120) as resp:
             if not resp.ok:
                 _handle(resp)  # raises BackendError with the message
             for line in resp.iter_lines():
