@@ -21,6 +21,7 @@ def _registry() -> Dict[str, Demo]:
         simulators, tokens, transformer,
     )
     from demos.ch05 import lab, lessons
+    from demos.ch06 import lessons as ch06
 
     return {
         "loop_stepper": Demo("Step through the generation loop", "free", simulators.loop_stepper),
@@ -57,6 +58,14 @@ def _registry() -> Dict[str, Demo]:
         "prompt_inspector": Demo("System prompt, context or tool?", "free", lessons.prompt_inspector),
         "prompt_cost": Demo("What each prompt version costs", "free", lessons.prompt_cost),
         "prompt_lab": Demo("Prompt Lab: measure a prompt change", "live", lab.prompt_lab),
+        # Chapter 6
+        "json_failures": Demo("Loud vs silent: the four JSON failures", "free", ch06.json_failures),
+        "constrained_decoding": Demo("Mask the tokens, compare the approaches", "free", ch06.constrained_decoding),
+        "schema_checker": Demo("Honest escape hatches and checkable evidence", "free", ch06.schema_checker),
+        "tool_round_trip": Demo("Step through a tool call", "free", ch06.tool_round_trip),
+        "tool_guard": Demo("Guard the refund tool", "free", ch06.tool_guard),
+        "validation_layers": Demo("Shape, meaning or safety: which layer catches it?", "free", ch06.validation_layers),
+        "repair_loop": Demo("Repair, limit, fall back", "free", ch06.repair_loop),
     }
 
 

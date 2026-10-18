@@ -1,0 +1,453 @@
+# Chapter 6 content. Same fields as chapter 1 (see ch01_how_llms_work.yaml).
+# Written from the user's "JSON Prompting Guide" notes on the course text
+# (~/Documents/JSON Prompting Guide.pages). Claude-specific API details in
+# "Go deeper" are from the Claude API docs.
+id: ch06
+number: 6
+title: "Structured output & tool calling"
+
+picture: |
+  digraph {
+    rankdir=LR; bgcolor="transparent"; nodesep=0.3;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985", fillcolor="#dbe8f8"];
+    edge [color="#8a8985"];
+    l01 [label="01 INSTRUCTION-ONLY JSON\na prompt is a request\n4 failure modes", fillcolor="#f6d5e3"];
+    l02 [label="02 STRUCTURED OUTPUT\nconstrained decoding\nmakes illegal output impossible", fillcolor="#fde3d8", penwidth=2];
+    l03 [label="03 SCHEMA DESIGN\nenums · required · no extras\nevidence over confidence"];
+    l04 [label="04 TOOL CALLING\nmodel requests,\nyour code executes"];
+    l05 [label="05 GUARDRAILS\nshape → meaning → safety"];
+    l06 [label="06 RETRY & RECOVERY\nrepair with feedback,\nlimit, fall back safely"];
+    p [label="6.1 PROVE IT", fillcolor="#d6f1e6", penwidth=2];
+    l01 -> l02 -> l03 -> l05 -> l06; l02 -> l04 -> l05;
+    l06 -> p;
+  }
+
+lessons:
+  - id: l01
+    number: "01"
+    title: "Instruction-only JSON"
+    status: ready
+    one_liner: "A prompt is a request, not a guarantee. Asking for JSON shifts token probabilities; it never forbids the invalid ones."
+    core_idea: "A model predicts the next token; it doesn't enforce JSON rules. Instruction-only JSON fails in four ways: truncation, a missing delimiter, prose wrapping (all loud: the parser throws) and a wrong value (silent: valid JSON, broken data)."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        p  [label="Prompt\n\"Return only JSON\"", fillcolor="#dbe8f8"];
+        m  [label="Model predicts tokens\n(prompt shifts probabilities,\nforbids nothing)", fillcolor="#fde3d8"];
+        pr [label="Parser\njson.loads", shape=diamond, style="dashed,filled", fillcolor="#ffffff"];
+        loud [label="LOUD: exception\n1 truncation\n2 missing delimiter\n3 prose wrapping", fillcolor="#fbecc4"];
+        v  [label="Validator\nallowed keys, values, types", shape=diamond, style="dashed,filled", fillcolor="#ffffff"];
+        quiet [label="SILENT if unchecked\n4 wrong value\n\"High\" not \"high\"", fillcolor="#f6d5e3", penwidth=2];
+        p -> m -> pr; pr -> loud [label="fails"]; pr -> v [label="parses"]; v -> quiet [label="fails"];
+      }
+    key_points:
+      - "**Prediction ≠ constraint.** The prompt influences probabilities but cannot guarantee valid output."
+      - "**Parsing ≠ validation.** Valid JSON can still contain the wrong keys, values or types."
+      - "**Loud errors are easier to find.** Bad syntax raises an exception; a wrong enum value like `\"High\"` parses fine and silently breaks downstream logic."
+      - "**Bigger outputs = more risk.** More fields, longer inputs and tighter token limits mean more chances to fail. Adding fields without raising the output limit makes truncation more likely."
+      - "**3% → 0.1% is not a fix.** A stronger prompt lowers the failure rate, but the mechanism hasn't changed: you're still relying on the model to follow instructions."
+    demo: json_failures
+    quiz:
+      - q: "Why doesn't a prompt that says \"Return only JSON\" guarantee JSON?"
+        options:
+          - "The model doesn't understand JSON"
+          - "It shifts token probabilities without forbidding invalid tokens"
+          - "JSON is too complex for language models"
+          - "The prompt is too short"
+        answer: 1
+        why: "The model still samples from every token. An instruction makes valid JSON likely; nothing makes invalid JSON impossible."
+      - q: "Which of the four failures passes `json.loads()` without an error?"
+        options:
+          - "Truncation"
+          - "Missing delimiter"
+          - "Prose wrapping"
+          - "Wrong enum value"
+        answer: 3
+        why: "`{\"priority\": \"High\"}` is perfectly valid JSON. Only a validator that knows the allowed values catches it, which is why it's the silent one."
+      - q: "You add six new fields to the output but leave `max_tokens` unchanged. Which failure becomes more likely?"
+        options:
+          - "Prose wrapping"
+          - "Truncation"
+          - "Wrong enum value"
+          - "None: field count doesn't matter"
+        answer: 1
+        why: "A longer output needs more tokens. If the limit runs out mid-object, the JSON ends before its closing brace."
+    deeper:
+      notes: |
+        **The four failure modes**
+
+        | Failure | Example | Does `json.loads()` catch it? |
+        |---|---|---|
+        | 1. Truncation | Object ends before `}` | Yes: loud error |
+        | 2. Missing delimiter | Missing comma between fields | Yes: loud error |
+        | 3. Prose wrapping | `Sure! Here's the JSON: {...}` | Yes: loud error |
+        | 4. Wrong enum value | `"High"` instead of `"high"` | **No: silent error** |
+
+        **Why each one happens:** truncation, the output token limit runs out · missing delimiter, the model generates invalid syntax · prose wrapping, the model adds conversational text · wrong value, valid JSON with a value your application doesn't allow.
+
+        **One sentence to memorise:** a prompt *requests* the format, a parser *checks* the syntax, a validator *checks* the data, and constrained decoding *enforces* the format during generation.
+      own_words:
+        q: "A stronger prompt cut JSON failures from 3% to 0.1%. Is the problem solved?"
+        answer: "No. The failure rate dropped, but the mechanism is the same: the model is still only asked to comply, and every invalid token is still possible. At high volume 0.1% is still many broken outputs, and the silent kind (wrong enum values) won't announce themselves. The fix is a mechanical guarantee (constrained decoding) plus a validator, not more persuasive wording."
+    source: "JSON Prompting Guide → 1. Instruction-only JSON"
+
+  - id: l02
+    number: "02"
+    title: "Structured output: make illegal output impossible"
+    status: ready
+    one_liner: "Don't just ask the model to follow the rules. Constrained decoding masks out every token that would break the schema, so illegal output can't be generated."
+    core_idea: "A prompt persuades; a constraint prevents. A constrained decoder masks tokens that would violate the schema before sampling, so only valid outputs are possible. It guarantees the allowed structure, not the truth of the content, and it can't stop an output limit cutting generation short."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        sofar [label="Output so far\n{\"priority\": \"", fillcolor="#dbe8f8"];
+        cand  [label="Candidate next tokens\nhigh · High · urgent · low", fillcolor="#eeeeee"];
+        mask  [label="DECODER MASK\nschema allows only\nlow | normal | high", fillcolor="#fde3d8", penwidth=2];
+        ok    [label="Sample from what's left:\nhigh · low", fillcolor="#d6f1e6"];
+        sofar -> cand -> mask -> ok;
+      }
+    key_points:
+      - "**Constrained sampling** masks out tokens that would violate the schema, so only tokens that can lead to a valid output are eligible. Like a railway track: the model chooses the route, the decoder blocks routes that leave the track."
+      - "**Behavioural vs mechanical:** behavioural = the model is asked to comply and usually does. Mechanical = code enforces compliance. Measure behavioural failure rates; inspect and verify a mechanical guarantee."
+      - "**Three provider approaches:** a JSON Schema response format, tool calling with a parameter schema, or JSON-only mode. ⚠️ JSON-only mode guarantees *parseable* JSON, not *your* schema."
+      - "**What survives:** truncation. If the output limit cuts generation short, no decoder can finish the object."
+      - "**Shape, not truth:** correct keys but wrong facts, a valid enum but the wrong class, an uncalibrated confidence score, required fields filled with invented data."
+    demo: constrained_decoding
+    quiz:
+      - q: "What does constrained decoding do?"
+        options:
+          - "Retries until the output parses"
+          - "Masks out tokens that would violate the schema before sampling"
+          - "Asks a second model to fix the JSON"
+          - "Strips text outside the first { and last }"
+        answer: 1
+        why: "The illegal tokens are never candidates, so an illegal output can't be produced. No retry or cleanup is needed for shape."
+      - q: "Which of the four JSON failures can still happen with constrained decoding?"
+        options:
+          - "Missing comma"
+          - "Prose wrapping"
+          - "Wrong enum case"
+          - "Truncation from an output limit"
+        answer: 3
+        why: "The decoder controls which tokens are allowed, not how many you've budgeted. Hit the limit mid-object and it ends unfinished."
+      - q: "Why is JSON-only mode risky?"
+        options:
+          - "It's slower"
+          - "It can produce parseable JSON that still violates your schema"
+          - "It doesn't work with tools"
+          - "It forbids enums"
+        answer: 1
+        why: "It enforces JSON syntax only. Wrong keys, missing fields and `\"High\"` are all still valid JSON."
+    deeper:
+      notes: |
+        **What happens to the four failures**
+
+        | Failure | With constrained decoding |
+        |---|---|
+        | Truncation | ❌ Still possible if the output limit cuts generation short |
+        | Missing comma | ✅ Prevented |
+        | Prose wrapping | ✅ Prevented when the schema requires an object |
+        | Wrong enum case (`"High"` vs `"high"`) | ✅ Prevented when the enum is enforced |
+
+        **Three different checks**
+        - **Decoder:** is the output structurally allowed?
+        - **Validator:** does it meet your application's rules?
+        - **Grounding / factual check:** is it actually supported by the source?
+
+        **Why required fields can cause fabrication:** the model *must* fill them, even when the source lacks the information. If a value might be unknown, allow `"unclear"` or `"needs_review"` instead of forcing a guess.
+
+        **On Claude:** a JSON Schema response format is `output_config.format`; `strict: true` on a tool definition guarantees its arguments match the schema. Check `stop_reason` before trusting the result: `max_tokens` means it was cut off, and a `refusal` may not match your schema.
+      own_words:
+        q: "What's the difference between a behavioural and a mechanical guarantee, and how do you test each?"
+        answer: "A behavioural guarantee means the model is asked to comply (a prompt instruction) and usually does, so you test it by measuring its failure rate on many inputs. A mechanical guarantee means code enforces compliance (a decoder that masks illegal tokens), so you don't measure a rate: you inspect and verify that the enforcement is actually switched on and covers the constraints you rely on."
+    source: "JSON Prompting Guide → 2. Structured output"
+
+  - id: l03
+    number: "03"
+    title: "Schema design"
+    status: ready
+    one_liner: "Your schema defines what the model is allowed to produce. Restrict the values, define the rules, close the gaps, and ask for evidence instead of confidence."
+    core_idea: "Make invalid outputs impossible instead of fixing them later: enums, required fields, no extra keys, length and range limits, and precise descriptions. Design fields around evidence you can check. The schema checks shape; post-validation checks reality."
+    picture: |
+      digraph {
+        rankdir=TB; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        bad  [label="BAD\n{\"priority\": \"high\",\n \"confidence\": 0.98}", fillcolor="#f6d5e3"];
+        badw [label="\"high\" is vague\n0.98 looks scientific,\nisn't calibrated", fillcolor="#fde3d8"];
+        good [label="BETTER\n{\"priority\": \"p1_outage\",\n \"evidence_quote\":\n \"Our payment system is completely down\"}", fillcolor="#dbe8f8", penwidth=2];
+        goodw [label="p1_outage = observable condition\nquote can be checked\nagainst the ticket", fillcolor="#d6f1e6"];
+        bad -> badw; good -> goodw;
+      }
+    key_points:
+      - "**Enums:** restrict values to an allowed list. `\"high\"` is valid; `\"High\"` is impossible if only lowercase is allowed. The highest-value improvement: it kills silent enum mismatches."
+      - "**Required + `additionalProperties: false`:** essential fields are always present and invented keys are impossible. Only require fields that can always be meaningfully filled."
+      - "**Length and range limits + precise descriptions:** block empty strings, overlong quotes and out-of-range numbers; say exactly when to choose each value, and when not to."
+      - "**Evidence over confidence:** replace a self-reported score with an `evidence_quote` you can check against the input."
+      - "**One way to say \"missing\":** either required + sentinel (`\"category\": \"unknown\"`) or optional (absent). Never both absence and an empty string: every consumer then has to handle two cases."
+    demo: schema_checker
+    quiz:
+      - q: "What's usually the highest-value schema improvement?"
+        options:
+          - "Adding a confidence score"
+          - "Enums: they eliminate invalid values and silent enum mismatches"
+          - "Making every field optional"
+          - "Longer field names"
+        answer: 1
+        why: "The wrong-enum failure is the silent one. Closing the value set at decoding makes it impossible."
+      - q: "Why replace `\"confidence\": 0.98` with an `evidence_quote`?"
+        options:
+          - "Quotes use fewer tokens"
+          - "A self-reported score may be uncalibrated; a quote can be checked against the original input"
+          - "Numbers aren't allowed in schemas"
+          - "Confidence makes the model slower"
+        answer: 1
+        why: "0.98 looks precise without meaning anything. A quote either appears in the ticket or it doesn't, which your code can verify."
+      - q: "Your schema checks that `order_id` matches `ORD-\\d{5}`. Does that prove the order exists?"
+        options:
+          - "Yes, if the pattern is strict enough"
+          - "No: correct format doesn't prove real-world existence; only checking the database does"
+          - "Yes, with constrained decoding"
+          - "Only if the field is required"
+        answer: 1
+        why: "The schema checks shape; post-validation checks reality. A perfectly formatted ID can still be invented."
+    deeper:
+      notes: |
+        **What belongs where**
+
+        | Schema enforces | Post-validation checks |
+        |---|---|
+        | Data types and required fields | ID exists in the database |
+        | Object and array structure | Quote actually appears in the source |
+        | Allowed enum values | Two fields agree logically |
+        | String lengths and numeric bounds | Total equals the sum of line items |
+
+        **Conditional fields** (e.g. a refund amount only when the refund is approved): use a nullable field and validate the relationship afterwards, or split the task into two calls.
+
+        **Check what your provider supports.** Claude's structured outputs, for example, don't enforce `minLength` / `minimum` in the decoder; the Python and TypeScript SDKs remove those from the schema they send and check them in code after the response instead. Same rule either way: know which constraints are enforced while generating and which are only checked after.
+
+        **One sentence to remember:** constrain what can be generated, describe decisions precisely, and validate anything that requires knowing the real world.
+      own_words:
+        q: "Why should a schema have one, and only one, way to represent missing information?"
+        answer: "If both an absent field and an empty string can mean \"unknown\", every downstream consumer has to handle both, and someone eventually forgets one. Pick a single representation (a required field with a sentinel like \"unknown\", or an optional field that's simply absent) so missing data is always one predictable case. A sentinel also gives the model an honest option instead of forcing it to invent a value."
+    source: "JSON Prompting Guide → 3. Schema design"
+
+  - id: l04
+    number: "04"
+    title: "Tool calling"
+    status: ready
+    one_liner: "The model requests an action; your code validates and executes it; the result goes back to the model. The model never executes anything."
+    core_idea: "A tool call is a request with schema-shaped arguments. Your code checks the order exists, belongs to this customer and the action is allowed, then runs it and returns success data or a structured error. Send both the model's tool request and the matching result back in the conversation."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        r1 [label="① Model requests\nchooses a tool +\nschema-shaped arguments", fillcolor="#fde3d8"];
+        r2 [label="② YOUR CODE\nvalidates and executes\nexists? owner? allowed?", fillcolor="#fbecc4", penwidth=2];
+        r3 [label="③ Tool returns\nsuccess data or a\nstructured error", fillcolor="#dbe8f8"];
+        r4 [label="④ Model responds\nanswers, or decides\nwhat to do next", fillcolor="#d6f1e6"];
+        r1 -> r2 -> r3 -> r4;
+        r4 -> r1 [label="next call", style=dashed, constraint=false];
+      }
+    key_points:
+      - "**The model does not execute the tool. Your application does.** The model only produces a structured request."
+      - "**A good tool definition:** a clear name (`get_order_status`), a specific description (\"Look up an order using its exact order ID\"), typed parameters, a format example (`ORD-48213`) and boundaries: when to use this tool instead of another."
+      - "**Schema-valid doesn't mean correct.** The schema guarantees `order_id` is a string, not that the order exists, belongs to this customer, or that the action is authorised. Treat tool arguments like input from an external API."
+      - "**Return useful errors, not crashes:** `{\"error\": \"order_not_found\", \"detail\": ..., \"hint\": \"Ask the customer to confirm the ID.\"}` lets the model recover. Never expose sensitive data in results; limit repeated retries."
+      - "**Keep the pair together:** include the assistant's tool request and its matching result in the follow-up. That's what links the result to the request."
+    demo: tool_round_trip
+    quiz:
+      - q: "Who executes the tool?"
+        options:
+          - "The model"
+          - "The API provider"
+          - "Your application"
+          - "Whichever is faster"
+        answer: 2
+        why: "The model only returns which tool and which arguments. Every effect happens in your code, after your checks."
+      - q: "A tool call has a schema-valid `order_id`. What must your code still check?"
+        options:
+          - "Nothing: the schema guaranteed it"
+          - "That it exists, belongs to this customer, and the action is authorised and supported by the request"
+          - "Only that it's a string"
+          - "Only the length"
+        answer: 1
+        why: "The schema guarantees structure and allowed values, not real-world correctness."
+      - q: "The order isn't found. What should the tool return?"
+        options:
+          - "Raise an exception and end the conversation"
+          - "The raw database error"
+          - "A structured error with what went wrong and a hint for what to do next"
+          - "An empty success"
+        answer: 2
+        why: "A structured error lets the model recover: ask the customer to confirm the ID, or try an alternative. A raw error can leak internals; a crash ends the interaction."
+    deeper:
+      notes: |
+        **When tools overlap**, the description is how the model chooses. Say what each tool is for, its preconditions, and when *not* to use it ("Use get_order_status for shipping questions. Do not use it for refunds; use issue_refund").
+
+        **On Claude:** the model stops with `stop_reason: "tool_use"` and a `tool_use` block (with an `id`). You reply with a `tool_result` block carrying the same `tool_use_id`; set `is_error: true` for a failure. If one reply contains several calls, send all the results back in one user message. `tool_choice` can be `auto` (model decides), `none`, or force a call, though some newer models reject forced calls: use `auto` and say in the prompt which tool to use.
+
+        **One sentence to remember:** the schema validates the shape, your code validates the reality, and the model uses the result to continue.
+      own_words:
+        q: "Why do you send the assistant's tool request back along with the tool result?"
+        answer: "The API keeps no memory between calls, so the next request must contain the whole story: the model asked for this tool with these arguments, and here is what it returned. Without the request, the result is an orphan the model can't connect to anything; with it, the model knows exactly which question the data answers and can continue."
+      demos: [tool_guard]
+    source: "JSON Prompting Guide → 4. Tool calling"
+
+  - id: l05
+    number: "05"
+    title: "Guardrails: shape, meaning, safety"
+    status: ready
+    one_liner: "Never trust model output just because it looks valid. Check three layers: shape (is it structured right?), meaning (is it true?), safety (is it safe to use?)."
+    core_idea: "Shape checks the format, meaning checks the facts, and safety checks the consequences. Validate even constrained output, check facts against real systems, never silently repair bad values, and use stronger checks for riskier actions."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        o  [label="Model output", shape=ellipse, fillcolor="#eeeeee"];
+        s  [label="① SHAPE\ntypes, required fields,\nenums, schema rules", fillcolor="#dbe8f8"];
+        m  [label="② MEANING\nquote is in the ticket?\nID in the database?\nfields agree?", fillcolor="#fbecc4"];
+        f  [label="③ SAFETY\nsensitive data? injection?\ndangerous action?", fillcolor="#fde3d8", penwidth=2];
+        ok [label="Use it", fillcolor="#d6f1e6"];
+        o -> s -> m -> f -> ok;
+      }
+    key_points:
+      - "**① Shape:** types, required fields, enums, schema rules. `priority` must be one of the allowed values."
+      - "**② Meaning:** check against the input, business rules and real systems. The evidence quote exists in the ticket; the order ID exists in the database."
+      - "**③ Safety:** sensitive data, unsafe content, injection risks, dangerous downstream actions. Never pass model text straight into a shell command or SQL query."
+      - "**Validate even constrained output.** Configuration changes, fallback paths or provider changes can bypass schema enforcement."
+      - "**Never silently repair.** Clamping a number or turning `\"High\"` into `\"high\"` hides the model's error. Fail visibly and investigate. And use stronger checks for refunds, emails and deletions than for dashboard labels."
+    demo: validation_layers
+    quiz:
+      - q: "Why validate shape if decoding is already constrained?"
+        options:
+          - "You don't need to"
+          - "To catch configuration mistakes, fallback paths that bypass the schema, or provider changes"
+          - "Because constrained decoding is often wrong"
+          - "To make it slower"
+        answer: 1
+        why: "The guarantee holds only while the enforcement is actually on. A cheap shape check notices the day it isn't."
+      - q: "An outage ticket comes back schema-valid but classified as `p3_question`. Which layer catches it?"
+        options:
+          - "Shape"
+          - "Meaning"
+          - "Safety"
+          - "None: it's valid"
+        answer: 1
+        why: "The structure is fine; the content is wrong for this input. Meaning checks (grounding against the ticket, business rules) are where it's caught."
+      - q: "The model returns `\"priority\": \"High\"` and your code lowercases it to make it pass. What's wrong with that?"
+        options:
+          - "Nothing: it's a harmless fix"
+          - "It hides the model's error instead of exposing it, so the bug is never investigated"
+          - "Lowercasing is slow"
+          - "It breaks the JSON"
+        answer: 1
+        why: "Silent repair makes the dashboard look clean while the cause (a missing enum, a bypassed schema) keeps happening. Fail visibly and fix the cause."
+    deeper:
+      notes: |
+        **What each layer catches**
+
+        | Layer | Catches | Cannot guarantee |
+        |---|---|---|
+        | Shape | Invalid structure or values | Truth |
+        | Meaning | Unsupported claims, inconsistent fields, nonexistent IDs | Safety in every context |
+        | Safety | Leaks, unsafe execution, dangerous content | Factual correctness by itself |
+
+        **Grounding** checks whether a claim is supported by actual evidence: the quote is really in the ticket, the number really appears in the document. It's the most useful meaning check, and it's only possible if the schema asked for evidence (lesson 03).
+
+        **One sentence to memorise:** shape checks the format, meaning checks the facts, and safety checks the consequences.
+      own_words:
+        q: "Name the three layers and one thing each can't guarantee."
+        answer: "Shape checks structure and allowed values, but can't guarantee the content is true. Meaning checks facts against the input and real systems (quote in the ticket, ID in the database), but can't guarantee the output is safe to use everywhere. Safety checks for leaks, injection and dangerous actions, but doesn't by itself make anything factually correct. You need all three."
+    source: "JSON Prompting Guide → 5. Guardrails"
+
+  - id: l06
+    number: "06"
+    title: "Retry & recovery"
+    status: ready
+    one_liner: "When output fails validation, repair it with specific feedback a limited number of times, then fail safely, and count every fallback."
+    core_idea: "Bad response → repair: send the model its rejected output, the exact failure and an instruction to change only what's needed. No response → transport retry with backoff. Cap attempts (usually two in total), then use a safe fallback such as human review, never a silent guess."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        g  [label="① Generate", fillcolor="#dbe8f8"];
+        v  [label="② Validate\nshape · meaning · safety", shape=diamond, style="dashed,filled", fillcolor="#ffffff"];
+        u  [label="Use the result", fillcolor="#d6f1e6"];
+        r  [label="Repair with specific feedback\nrejected output + exact error\n+ \"change only this\"", fillcolor="#fbecc4"];
+        fb [label="Attempts used up →\nSAFE FALLBACK\nhuman review · clear error ·\nomit the feature", fillcolor="#fde3d8", penwidth=2];
+        g -> v; v -> u [label="pass"]; v -> r [label="fail"]; r -> v [label="attempt 2"]; r -> fb [label="limit hit", style=dashed];
+      }
+    key_points:
+      - "**Two kinds of retry:** *validation retry*, the model answered but the output failed checks, so repair it. *Transport retry*, the call failed (timeout, rate limit, server error), so retry with backoff. Bad response → repair; no response → transport retry."
+      - "**Repair with specifics:** the rejected response, the exact failure, and \"change only what's necessary\". E.g. \"Your evidence quote does not appear verbatim in the ticket. Select an exact quote and change only that field.\""
+      - "**Code may repair, but only deterministically:** strip surrounding prose, yes. Invent missing data, never."
+      - "**Bound attempts:** usually two in total (one call + one repair), sometimes three. It stops endless loops, caps cost and latency, and stops unanswerable inputs eating calls."
+      - "**Fail safely and visibly:** route to human review, return a clear error, or omit the feature. Never quietly pick `low` priority to keep things moving. Log failure codes and count every fallback."
+    demo: repair_loop
+    quiz:
+      - q: "The API call times out. Which kind of retry is this?"
+        options:
+          - "Validation retry: send the error to the model"
+          - "Transport retry: retry the call with backoff"
+          - "No retry: fall back immediately"
+          - "Repair the output in code"
+        answer: 1
+        why: "There's no response to repair. Transport failures are retried by policy (with backoff); validation failures get repaired with feedback."
+      - q: "Why include the rejected response in the repair request?"
+        options:
+          - "To use up the token budget"
+          - "So the model corrects its actual mistake instead of guessing again from scratch"
+          - "The API requires it"
+          - "To make the model apologise"
+        answer: 1
+        why: "Seeing what it produced plus the exact failure lets the model fix that field. Without it, a fresh attempt can fail in a brand-new way."
+      - q: "5% of evidence quotes fail grounding. What should you do first?"
+        options:
+          - "Raise the retry limit to five"
+          - "Investigate and improve the prompt, schema or extraction process"
+          - "Lowercase the quotes"
+          - "Drop the grounding check"
+        answer: 1
+        why: "A steady failure rate is a design signal, not bad luck. More retries just pay more to hide it."
+    deeper:
+      notes: |
+        **What makes a fallback safe:** if it's wrong, it must not cause harmful or irreversible consequences.
+        - **Safe default:** route an uncertain ticket to human review.
+        - **Controlled failure:** return a clear error if no safe result exists.
+        - **Degraded feature:** leave out an unreliable summary rather than invent one.
+
+        **Log failure codes** (`quote_not_in_ticket`, `order_not_found`, `enum_invalid`…). Recurring codes point at a weakness in your schema, prompt or input handling.
+
+        **Retries cost money and time.** Each repair re-sends the input. Two attempts in total keeps the worst case at roughly double one call.
+
+        **One sentence to memorise:** validate, repair with specific feedback, limit attempts, and fall back safely without hiding failures.
+      own_words:
+        q: "What's the difference between a validation retry and a transport retry, and how do you handle each?"
+        answer: "A transport retry is for when no usable response came back (timeout, rate limit, server error): you retry the same call with backoff, and the SDK often does this for you. A validation retry is for when a response came back but failed your shape, meaning or safety checks: you send the model its rejected output and the exact failure, ask it to change only what's needed, cap the attempts, and fall back safely if it still fails."
+    source: "JSON Prompting Guide → 6. Retry & recovery"
+
+  - id: prove_it
+    number: "6.1"
+    title: "Prove it"
+    status: ready
+    draft: true
+    kind: prove_it
+    one_liner: "Prove you understand the chapter: a mixed quiz from all lessons, from memory."
+    core_idea: "Can you explain chapter 6 without looking? Answer a mixed set of questions from every lesson."
+    can_you:
+      - "Name the four instruction-only JSON failures and say which one json.loads() misses"
+      - "Explain how constrained decoding works and which failure it can't prevent"
+      - "Say why JSON-only mode isn't the same as a schema guarantee"
+      - "List the five rules of a good schema, and why evidence beats a confidence score"
+      - "Walk through the tool-calling loop and say who executes the tool"
+      - "Name the three guardrail layers and one example check for each"
+      - "Tell a validation retry from a transport retry, and describe a safe fallback"
+    source: "Our version of 'Prove it', built from the JSON Prompting Guide's self-checks. The course's exercise may differ; paste it to align."

@@ -7,7 +7,7 @@ chapters:
   - {id: ch03, number: 3, title: "Python & tooling"}
   - {id: ch04, number: 4, title: "Model APIs & failure handling"}
   - {id: ch05, number: 5, title: "Prompting & context engineering", content: ch05_prompting.yaml}
-  - {id: ch06, number: 6, title: "Structured output & tool calling"}
+  - {id: ch06, number: 6, title: "Structured output & tool calling", content: ch06_structured_output.yaml}
   - {id: ch07, number: 7, title: "RAG & retrieval quality"}
   - {id: ch08, number: 8, title: "Fine-tuning & when to use it"}
   - {id: ch09, number: 9, title: "Evals (signature skill)"}
