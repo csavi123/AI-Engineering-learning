@@ -16,6 +16,10 @@ sampling_model: claude-haiku-4-5
 # Safety cap: no experiment may repeat a call more than this many times.
 max_repeated_runs: 30
 
+# The chapter 5 Prompt Lab runs a whole message set in one go (one version on
+# test + prod is 44 calls), so it gets its own, larger cap.
+eval_max_calls: 200
+
 # Spend guard: the backend refuses Claude calls once this calendar month's
 # estimated spend reaches this amount (USD). Spend is tracked in data/spend.json.
 monthly_budget_usd: 1.00

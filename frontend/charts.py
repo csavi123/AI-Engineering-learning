@@ -72,3 +72,28 @@ def grouped_bars(
     fig.update_xaxes(title=x_title, showgrid=False)
     fig.update_yaxes(title="count", showgrid=True, gridcolor="rgba(128,128,128,0.15)")
     return fig
+
+
+def percent_bars(groups: Dict[str, Dict[str, float]], title: str, x_title: str = "") -> go.Figure:
+    """Side-by-side bars of shares (0..1) per category, e.g. accuracy per class.
+
+    Category order follows the first group, so labels stay in a fixed order.
+    """
+    categories = list(dict.fromkeys(k for g in groups.values() for k in g))
+    fig = go.Figure()
+    for i, (name, values) in enumerate(groups.items()):
+        ys = [values.get(c) for c in categories]
+        fig.add_bar(
+            name=name,
+            x=categories,
+            y=ys,
+            marker_color=SERIES[i % len(SERIES)],
+            text=[f"{y:.0%}" if y is not None else "" for y in ys],
+            textposition="outside",
+            hovertemplate=name + "<br>%{x}: %{y:.0%}<extra></extra>",
+        )
+    fig = _base_layout(fig, title, height=360)
+    fig.update_layout(barmode="group", showlegend=True, legend=dict(orientation="h", y=-0.2))
+    fig.update_xaxes(title=x_title, showgrid=False)
+    fig.update_yaxes(tickformat=".0%", range=[0, 1.15], showgrid=True, gridcolor="rgba(128,128,128,0.15)")
+    return fig

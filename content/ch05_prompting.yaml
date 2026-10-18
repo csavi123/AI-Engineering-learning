@@ -1,0 +1,343 @@
+# Chapter 5 content. Same fields as chapter 1 (see ch01_how_llms_work.yaml).
+# Extra kind: "lab" = one big experiment page (core idea + demo, no card).
+# Written from the user's "Prompt Reliability Guide" notes on the course text.
+id: ch05
+number: 5
+title: "Prompting & context engineering"
+
+picture: |
+  digraph {
+    rankdir=LR; bgcolor="transparent"; nodesep=0.3;
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985", fillcolor="#dbe8f8"];
+    edge [color="#8a8985"];
+    l01 [label="01 A prompt is an INTERFACE\nshape · behaviour · difficulty", fillcolor="#fde3d8", penwidth=2];
+    l02 [label="02 FEW-SHOT\nexamples on the boundary\n+ counter-examples"];
+    l03 [label="03 DECOMPOSITION\nextract → reason → format"];
+    l04 [label="04 CONTEXT ENGINEERING\nsystem · context · tool"];
+    l05 [label="05 TOKEN BUDGET\nmoney · time · space"];
+    lab [label="5.1 PROMPT LAB\nmeasure the change", fillcolor="#d6f1e6", penwidth=2];
+    l01 -> l02 -> l03; l01 -> l04 -> l05;
+    l02 -> lab; l04 -> lab; l05 -> lab;
+  }
+
+lessons:
+  - id: l01
+    number: "01"
+    title: "A prompt is an interface"
+    status: ready
+    one_liner: "In production a prompt must hold its contract on every input, not produce one impressive answer. Good output once ≠ reliable output every time."
+    core_idea: "Read a prompt like an interface: a declared input, a closed set of legal outputs, and defined behaviour at the edges (empty, messy, hostile input). The goal is the most reliable behaviour across all inputs, not the best single answer."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        f [label="Flaky prompt", fillcolor="#eeeeee", shape=ellipse];
+        s [label="SHAPE drift\nright info, wrong format", fillcolor="#dbe8f8"];
+        b [label="BEHAVIOUR drift\nright format,\ninconsistent decisions", fillcolor="#fde3d8"];
+        d [label="DIFFICULTY\ntoo much in one step", fillcolor="#fbecc4"];
+        s2 [label="Structured output /\nclosed label set", fillcolor="#d6f1e6"];
+        b2 [label="Few-shot examples\n(lesson 02)", fillcolor="#d6f1e6"];
+        d2 [label="Decomposition\n(lesson 03)", fillcolor="#d6f1e6"];
+        f -> s -> s2; f -> b -> b2; f -> d -> d2;
+      }
+    key_points:
+      - "**Contract-identical, not byte-identical:** \"Refund requested\" and \"Customer wants a refund\" can both be fine; `very high` when your code accepts only low/normal/high is broken."
+      - "**No crash is not evidence.** A model given an empty message confidently invents a label; the error shows up three steps later as a routing mistake."
+      - "**Diagnose before you edit:** shape (format), behaviour (inconsistent judgement), or difficulty (too much at once)? Adding \"You MUST\" only addresses shape, and badly."
+      - "**Close the value set, define the edges, delimit the input:** a closed label list, a rule for empty input, and tags so \"ignore the above\" is data, not instruction."
+      - "**A prompt instruction is a request, not a constraint.** It makes the right output likely and the wrong one detectable; schemas (chapter 6) make it impossible."
+    demo: contract_checker
+    quiz:
+      - q: "Your classifier returns `\"urgency\": \"very high\"` and your code accepts low, normal, high. What kind of failure is this?"
+        options:
+          - "Fine: the meaning is clear"
+          - "A broken contract (shape): the value is outside the closed set your code handles"
+          - "A behaviour drift: the judgement is inconsistent"
+          - "A difficulty problem: split the task"
+        answer: 1
+        why: "It's nearly identical as text but contract-broken. Your code will either throw or silently take a wrong branch."
+      - q: "Why is 'it didn't crash on 3 test inputs' not evidence a prompt works?"
+        options:
+          - "Because models always crash on the fourth input"
+          - "Because a model given bad input returns something that looks exactly like a correct answer"
+          - "Because temperature makes every run different"
+          - "Because three inputs cost too little to matter"
+        answer: 1
+        why: "There's no exception to catch. Wrong answers have the right shape, so you must test edge cases and score them."
+      - q: "The JSON shape is always right, but borderline messages get 'complaint' one day and 'feedback' the next. What do you reach for?"
+        options:
+          - "Structured output"
+          - "Few-shot examples on that boundary"
+          - "Decomposition"
+          - "Shouting: 'You MUST be consistent'"
+        answer: 1
+        why: "Shape is fine, so it's behaviour drift: a specification problem. Show where the boundary sits."
+    deeper:
+      notes: |
+        **The interface review questions** for any prompt in a code review:
+        1. What is the complete set of outputs it can legally produce?
+        2. What does it do on empty or malformed input?
+        3. What in this text is instruction, and what is untrusted data?
+
+        A prompt that can't answer those isn't finished, however good the sample output looked.
+
+        **Temperature 0 is not the determinism you need.** It makes sampling greedy and output closer to repeatable, but the reliability that matters is the *contract* holding across every input. (Haiku 5.5 doesn't even accept temperature, which is why the Prompt Lab measures noise with repeats instead.)
+      own_words:
+        q: "Your prompt works brilliantly on three inputs and unpredictably on the fourth. Why is it not shippable?"
+        answer: "Production sends the fourth kind of input constantly (empty, forwarded chains, other languages, injected text). The prompt won't crash on them; it returns something confident, correctly shaped and wrong, which the pipeline accepts. Reliability is the contract holding across the whole input range, which you only know by scoring a fixed set that includes those inputs."
+    source: "Prompt Reliability Guide → 1. A prompt is an interface, not a piece of writing"
+
+  - id: l02
+    number: "02"
+    title: "Few-shot: examples that earn their tokens"
+    status: ready
+    one_liner: "Show, don't tell: two or three examples on the exact boundary you keep getting wrong, plus a counter-example so the fix doesn't overcorrect."
+    core_idea: "An example demonstrates a point on the decision boundary; an instruction only describes it. Pick examples from your real failures, add a counter-example, and remember they're paid for on every call."
+    picture: |
+      digraph {
+        rankdir=TB; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        run [label="Run current prompt\non real (dev) inputs", fillcolor="#dbe8f8"];
+        grp [label="Group errors by CONFUSION\n\"question-shaped bugs → question\"", fillcolor="#fde3d8", penwidth=2];
+        ex  [label="1 example per top confusion\n+ 1 nearby counter-example", fillcolor="#d6f1e6"];
+        m   [label="Re-measure on HELD-OUT test\n(did another class get worse?)", fillcolor="#fbecc4"];
+        run -> grp -> ex -> m;
+        m -> run [label="next boundary", style=dashed, constraint=false];
+      }
+    key_points:
+      - "**Cover confusions, not categories.** Three clean examples from three labels teach what the model already knew."
+      - "**Add a counter-example.** Teach only 'a question can be a bug' and the model learns 'questions are bugs': question accuracy collapses. That's v4 vs v5 in the Prompt Lab."
+      - "**Rule or example?** If you can say the boundary in one sentence, try the sentence first (v3) and measure. If you can recognise it but not say it, an example is cheaper."
+      - "**Examples ride on every call.** 3 × 800 tokens at 10,000 calls/day = 24M extra input tokens a day. Use the fewest that achieve the behaviour."
+      - "**Few-shot fixes 'almost right', not 'cannot'.** It can't supply missing knowledge or a missing skill."
+    demo: prompt_versions
+    quiz:
+      - q: "Why do three clean examples, one per label, often buy almost nothing?"
+        options:
+          - "Models ignore examples"
+          - "They're cases the model already got right, so they carry no boundary information"
+          - "Three is too few; you need at least ten"
+          - "Examples only help with formatting"
+        answer: 1
+        why: "The informative examples sit exactly on the boundary you keep failing. Easy ones cost tokens forever and teach nothing."
+      - q: "What is the counter-example for?"
+        options:
+          - "To fill the token budget"
+          - "To stop the fix from overcorrecting into a new error"
+          - "To test the model's knowledge"
+          - "To make the prompt look balanced"
+        answer: 1
+        why: "Without it, 'question-shaped bug → bug' becomes 'everything question-shaped → bug', and you broke a class you weren't measuring."
+      - q: "What new failure does dynamic example selection add?"
+        options:
+          - "It costs more than static examples"
+          - "Retrieval can pick the wrong examples, and the prompt now changes per call so you can't reason about it by reading it"
+          - "It only works with large models"
+          - "None: it's strictly better"
+        answer: 1
+        why: "It saves tokens but needs more measurement, not less, because behaviour now depends on what was retrieved."
+    deeper:
+      notes: |
+        **Order matters:** models weight recent context more, so the most important boundary case goes **last**. v5 puts the question-shaped bug example last for that reason.
+
+        **Reasons in examples:** a short "(why)" after a label costs tokens but often generalises better on genuinely ambiguous boundaries, because it names the principle.
+
+        **Dynamic few-shot:** keep an example store, embed the incoming message, and include the nearest few (chapter 7's retrieval, pointed at examples). Move to it only when one set of boundary cases is crowding out another, not because "more examples feel better".
+      own_words:
+        q: "How would you decide between adding a one-sentence rule and a worked example?"
+        answer: "Try the cheaper one first and measure: if the boundary can be stated crisply in one sentence, add the sentence (like v3) and compare its held-out accuracy and per-class numbers against the example version (v5). Keep whichever buys the accuracy at the lower recurring token cost."
+    source: "Prompt Reliability Guide → Few-shot prompting"
+
+  - id: l03
+    number: "03"
+    title: "Decomposition"
+    status: ready
+    one_liner: "When a prompt fails in scattered, unrepeatable ways after several rewrites, it's overloaded: split it into extract → reason → format, each step checkable."
+    core_idea: "One repeatable mistake is a specification bug: fix it with a rule or an example. Many scattered mistakes mean the prompt is doing too much at once: split it into extract → reason → format, so each step has one job and an output you can check."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        one [label="ONE-SHOT\nfind + judge + format\nin one call\n→ rating moves, invented\nclause numbers", fillcolor="#f6d5e3"];
+        ex  [label="① EXTRACT\nquote clauses verbatim\nno judging\n(cheap fast model)", fillcolor="#dbe8f8"];
+        chk [label="Code check:\nis every quote really\nin the contract?", shape=diamond, style="dashed,filled", fillcolor="#ffffff"];
+        re  [label="② REASON\njudge ONLY the\nextracted clauses\n(strong model)", fillcolor="#fde3d8", penwidth=2];
+        fm  [label="③ FORMAT\nbuild the output\n(often plain code)", fillcolor="#d6f1e6"];
+        one -> ex [label="split it", style=dashed];
+        ex -> chk -> re -> fm;
+      }
+    key_points:
+      - "**The signal:** if you can write one sentence that describes all ten failures, it's a specification bug (rule or example). If the best you can say is \"it gets confused on the long ones\", the prompt is overloaded and editing won't fix it."
+      - "**Count the verbs:** \"read, find, decide, return\" is four jobs chained in one pass. Each has an error rate, they compound, and you only see the final answer."
+      - "**Extract → reason → format:** extraction is near-mechanical and checkable; reasoning works on a small, clean input instead of 30 pages; formatting often needs no model at all."
+      - "**It unlocks a code check:** once extraction is its own step, code can assert every quoted clause appears in the source. A made-up clause number becomes impossible to miss."
+      - "**It has a price:** more calls, more latency, more tokens (in-between results are written, then read again) and more code. Split only when you measured one prompt failing, and don't over-split."
+      - "**It makes mixed models possible:** each step gets its own model, so a cheap model extracts, a strong one reasons, and code formats. Often cheaper overall despite more tokens."
+    demo: decomposition_checker
+    quiz:
+      - q: "Ten failures all share one sentence: \"it labels question-shaped bug reports as questions\". What is this?"
+        options:
+          - "An overloaded prompt: decompose it"
+          - "A specification bug: fix it with a clearer rule or a boundary example"
+          - "A model that's too small"
+          - "Random noise"
+        answer: 1
+        why: "One consistent, repeatable mistake points at one boundary. Scattered mistakes with no shared sentence are the overload signal."
+      - q: "Which check becomes possible in extract → reason → format that a one-shot prompt makes impossible?"
+        options:
+          - "Checking the JSON is valid"
+          - "Asking the model if it's sure"
+          - "Verifying in code that every extracted clause appears verbatim in the source document"
+          - "Counting the tokens"
+        answer: 2
+        why: "Extraction gives you an in-between artefact. Code can test it against the source before any judging happens, so an invented clause gets caught."
+      - q: "A single prompt already handles a simple task correctly 99% of the time. Should you split it into three steps?"
+        options:
+          - "Yes: decomposition is always more reliable"
+          - "No: it adds calls, latency, tokens and code for almost no reliability gain"
+          - "Yes, but only with a bigger model"
+          - "Only if you also add few-shot examples"
+        answer: 1
+        why: "Decompose because you measured scattered failures and the split fixed them, not on principle."
+    deeper:
+      notes: |
+        **Partial failure is an advantage.** A three-step chain can succeed at ① and ② and fail at ③. Keep the extracted clauses (stored in your own database) and retry only the cheap step, without re-reading 30 pages. It also means in-between results need somewhere to live: real engineering work the one-shot version doesn't have.
+
+        **Don't over-split.** Seven steps where three would do multiplies latency and failure points, and each hop loses information: a fact step five needed was dropped at step two. A good step is **one thinking job with a checkable output**, not the smallest possible instruction.
+
+        **Why mixed models need this:** one big prompt forces one model, and it has to be one that can handle the hardest part. So you pay strong-model prices for the easy extraction and formatting too. Split it, and the high-volume easy steps move to the cheap model.
+      own_words:
+        q: "Why can't you route steps to different models before decomposing?"
+        answer: "Because one prompt is one call, and one call runs on one model, which must be strong enough for the hardest part of the task. Only after splitting does each step become its own call with its own model choice: a cheap fast model for extraction, the strong model just for the hard reasoning step, and plain code for formatting. Decomposition is the precondition for routing."
+    source: "Prompt Reliability Guide → Decomposition"
+
+  - id: l04
+    number: "04"
+    title: "Context engineering: system, context or tool?"
+    status: ready
+    one_liner: "Decide what the model needs, when, and where: stable rules in the system prompt, per-request data in the context, on-demand or live data through tools."
+    core_idea: "When an answer is wrong, first ask: what did the model actually have in front of it? Print the fully assembled prompt. Then put each piece of information where it belongs: stable → system prompt, per-request → context window, on-demand/live → tool."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985", fontname="Helvetica", fontsize=10, fontcolor="#8a8985"];
+        q [label="A piece of\ninformation", shape=ellipse, fillcolor="#eeeeee"];
+        sys [label="SYSTEM PROMPT\nsame every time,\nneeded every time\n(rules, labels, examples)", fillcolor="#dbe8f8"];
+        ctx [label="CONTEXT WINDOW\nchanges per request,\nknown before the call\n(message, history, docs)", fillcolor="#fde3d8"];
+        tool [label="TOOL CALL\nneeded sometimes; too big,\nprivate or fresh to preload\n(balance, order status)", fillcolor="#d6f1e6"];
+        q -> sys [label="stable?"]; q -> ctx [label="per request?"]; q -> tool [label="on demand?"];
+      }
+    key_points:
+      - "**System prompt:** same every time, needed every time. Put it first: a stable prefix can be cached."
+      - "**Context window:** changes per request and you can tell before the call what's needed. Your app decides (that's retrieval)."
+      - "**Tool call:** needed only sometimes, or too large, private or fresh to preload. The *model* decides when it needs it."
+      - "**Keep live data live:** balances, prices, inventory and entitlements go stale in a prompt. Fetch them."
+      - "**Prompting, cost and model choice are linked:** more context can raise accuracy and raise every call's cost."
+    demo: prompt_inspector
+    quiz:
+      - q: "Where should a customer's current refund eligibility go?"
+        options:
+          - "The system prompt, so the model always knows it"
+          - "A tool call: it's private, changes over time, and is needed only sometimes"
+          - "Nowhere: the model can infer it"
+          - "The few-shot examples"
+        answer: 1
+        why: "Preloading it would be stale and paid for on every call; a tool fetches it fresh, only when the model needs it."
+      - q: "What's the difference between retrieval and a tool call?"
+        options:
+          - "There is none"
+          - "Retrieval: your app picks the context before the call. Tool: the model decides mid-answer that it needs something"
+          - "Tools are only for actions, never for data"
+          - "Retrieval is always cheaper"
+        answer: 1
+        why: "It changes WHO decides what's needed: your code before the call, or the model during it."
+      - q: "A prompt gives a wrong answer in production. What's the context-engineering first move?"
+        options:
+          - "Switch to a bigger model"
+          - "Add 'think carefully' to the prompt"
+          - "Print the fully assembled prompt the model actually received"
+          - "Lower the temperature"
+        answer: 2
+        why: "Often the variable that should hold the customer's data was empty, truncated or wrong. You can't debug what you haven't looked at."
+    deeper:
+      notes: |
+        **Ask three questions when designing a system:**
+
+        | Question | Goes in |
+        |---|---|
+        | What stays the same? | System prompt |
+        | What changes for each request? | Context window |
+        | What information or actions are needed on demand? | Tools |
+
+        In the Prompt Lab, the labels/rules/examples are the system prompt, the customer message is the context, and anything about the customer's account would be a tool. The lab's tab ④ shows the exact split and its token counts.
+      own_words:
+        q: "How do you decide what goes in the system prompt versus the context window versus a tool call?"
+        answer: "By how often it changes and who knows it's needed. Stable and always needed → system prompt (first, so it's cacheable). Changes per request and the app knows before the call → context window. Needed only sometimes, too big, private or too fresh to preload → a tool the model calls when it realises it needs it."
+    source: "Prompt Reliability Guide → Context engineering"
+
+  - id: l05
+    number: "05"
+    title: "Tokens are money, time and space"
+    status: ready
+    one_liner: "Every token in the prompt is paid on every call. Measure it, cut what doesn't earn its place, put stable content first, and leave room in the window."
+    core_idea: "Long system prompts and few-shot examples are charged on every single call. Measure them with a real tokenizer, and keep each one only if its accuracy gain is worth its recurring cost."
+    picture: |
+      digraph {
+        rankdir=LR; bgcolor="transparent";
+        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#8a8985"];
+        edge [color="#8a8985"];
+        a [label="Instructions\n+ examples\n(stable: CACHE)", fillcolor="#dbe8f8"];
+        b [label="Relevant docs\n+ history", fillcolor="#fde3d8"];
+        c [label="Current input", fillcolor="#fbecc4"];
+        d [label="Reserved\noutput space", fillcolor="#d6f1e6"];
+        a -> b -> c -> d [label=""];
+        w [label="All must fit the context window", shape=note, fillcolor="#eeeeee"];
+        d -> w [style=dashed];
+      }
+    key_points:
+      - "**Measure, don't guess:** 420 → 1,180 input tokens per request is +7.6M tokens a day at 10,000 calls."
+      - "**Shorter can be better:** cutting repeated instructions and irrelevant examples is cheaper and often more reliable."
+      - "**Stable first, changing last:** a change near the start breaks the cached prefix for everything after it."
+      - "**The window is a hard limit:** instructions, docs, history, input and the reserved output all compete for it."
+      - "**Input dominates volume; output costs more per token** and sets how long the user waits."
+    demo: prompt_cost
+    quiz:
+      - q: "Why put the system prompt and examples BEFORE the per-request message?"
+        options:
+          - "Models read the start more carefully"
+          - "A stable shared prefix can be cached; anything that changes early breaks the cache for what follows"
+          - "The API requires it"
+          - "It uses fewer tokens"
+        answer: 1
+        why: "Caching matches prefixes. Stable first, changing content last."
+      - q: "v5's examples raise held-out accuracy by 2 points and add 300 tokens to every call. How do you decide?"
+        options:
+          - "Always keep them: accuracy is all that matters"
+          - "Always remove them: tokens are expensive"
+          - "Compare the gain (and its interval) against the recurring cost at your call volume, and try a cheaper one-sentence rule first"
+          - "Add more examples until it's 10 points"
+        answer: 2
+        why: "Every example must earn its place: a measured gain, beyond noise, worth its per-call cost."
+      - q: "Which is usually true?"
+        options:
+          - "Output tokens dominate the volume, input tokens the price"
+          - "Input tokens dominate the volume; output tokens cost more each and drive latency"
+          - "They cost the same"
+          - "Only output tokens are billed"
+        answer: 1
+        why: "You send far more than you get back, but each output token is pricier and generated one at a time."
+    source: "Prompt Reliability Guide → Tokens are money, time and limited space"
+
+  - id: lab
+    number: "5.1"
+    title: "Prompt Lab: prove it with numbers"
+    status: ready
+    kind: lab
+    one_liner: "One task, five prompt versions, one change each, scored on the same held-out and messy messages: a before/after accuracy change you measured."
+    core_idea: "A prompt change is an improvement only if a fixed, labelled, held-out set says so, by more than the noise, without breaking another class, at a cost worth paying. Run versions here and read the answers to the four interview questions off your own numbers."
+    demo: prompt_lab
+    source: "Built from the Prompt Reliability Guide's support-triage example."

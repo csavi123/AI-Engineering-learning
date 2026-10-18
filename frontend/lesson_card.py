@@ -33,6 +33,11 @@ def render(chap: Dict[str, Any], lesson: Dict[str, Any], cfg: Dict[str, Any]) ->
     if lesson.get("kind") == "prove_it":
         _prove_it(chap, lesson)
         return
+    if lesson.get("kind") == "lab":
+        # A lab is one big experiment, not a card: the idea, then the demo.
+        st.success(f"**💡 {lesson['core_idea']}**")
+        _demo(lesson["demo"], cfg)
+        return
 
     # 1. Core idea
     st.success(f"**💡 If you remember one thing:** {lesson['core_idea']}")

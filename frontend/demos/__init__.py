@@ -20,6 +20,7 @@ def _registry() -> Dict[str, Demo]:
         context, generation, knowledge, long_context, memory, sampling, sensitivity,
         simulators, tokens, transformer,
     )
+    from demos.ch05 import lab, lessons
 
     return {
         "loop_stepper": Demo("Step through the generation loop", "free", simulators.loop_stepper),
@@ -49,6 +50,13 @@ def _registry() -> Dict[str, Demo]:
         "truncation_sim": Demo("What survives when you cut the history?", "free", long_context.truncation_sim),
         "needle_test": Demo("Needle in a haystack", "live", long_context.needle_test),
         "output_truncation": Demo("Cut the answer short with max_tokens", "live", long_context.output_truncation),
+        # Chapter 5
+        "contract_checker": Demo("Byte-identical vs contract-identical", "free", lessons.contract_checker),
+        "prompt_versions": Demo("Five prompts, one change each", "free", lessons.prompt_versions),
+        "decomposition_checker": Demo("Catch the made-up clause", "free", lessons.decomposition_checker),
+        "prompt_inspector": Demo("System prompt, context or tool?", "free", lessons.prompt_inspector),
+        "prompt_cost": Demo("What each prompt version costs", "free", lessons.prompt_cost),
+        "prompt_lab": Demo("Prompt Lab: measure a prompt change", "live", lab.prompt_lab),
     }
 
 
